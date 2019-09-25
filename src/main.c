@@ -235,15 +235,15 @@ void mainloop()
       switch (slRxPacket.type)
       {
         case SYSLINK_RADIO_RAW:
-          if (esbCanTxPacket() && (slRxPacket.length < SYSLINK_MTU))
+          if (esbCanTxRawPacket() && (slRxPacket.length < SYSLINK_MTU))
           {
-            EsbPacket* packet = esbGetTxPacket();
+            EsbPacket* packet = esbGetTxRawPacket();
 
             if (packet) {
               memcpy(packet->data, slRxPacket.data, slRxPacket.length);
               packet->size = slRxPacket.length;
 
-              esbSendTxPacket(packet);
+              esbSendTxRawPacket(packet);
             }
             bzero(slRxPacket.data, SYSLINK_MTU);
           }
@@ -256,6 +256,20 @@ void mainloop()
           }
 #endif
 
+          break;
+        case SYSLINK_RADIO_P2P:
+          if (esbCanTxP2PPacket() && (slRxPacket.length < SYSLINK_MTU))
+          {
+            EsbPacket* packet = esbGetTxP2PPacket();
+
+            if (packet) {
+              memcpy(packet->data, slRxPacket.data, slRxPacket.length);
+              packet->size = slRxPacket.length;
+
+              esbSendTxP2PPacket(packet);
+            }
+            bzero(slRxPacket.data, SYSLINK_MTU);
+          }
           break;
         case SYSLINK_RADIO_CHANNEL:
           if(slRxPacket.length == 1)
@@ -458,10 +472,10 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
 #if BLE
       bleCrazyfliesSendPacket(&txpk);
 #endif
-      if (esbCanTxPacket()) {
-        struct esbPacket_s *pk = esbGetTxPacket();
+      if (esbCanTxRawPacket()) {
+        struct esbPacket_s *pk = esbGetTxRawPacket();
         memcpy(pk, &txpk, sizeof(struct esbPacket_s));
-        esbSendTxPacket(pk);
+        esbSendTxRawPacket(pk);
       }
 
       break;
@@ -492,9 +506,9 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
       pmSetState(pmSysRunning);
       break;
     case BOOTLOADER_CMD_GETVBAT:
-      if (esbCanTxPacket()) {
+      if (esbCanTxRawPacket()) {
         float vbat = pmGetVBAT();
-        struct esbPacket_s *pk = esbGetTxPacket();
+        struct esbPacket_s *pk = esbGetTxRawPacket();
 
         pk->data[0] = 0xff;
         pk->data[1] = 0xfe;
@@ -503,7 +517,7 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
         memcpy(&(pk->data[3]), &vbat, sizeof(float));
         pk->size = 3 + sizeof(float);
 
-        esbSendTxPacket(pk);
+        esbSendTxRawPacket(pk);
       }
       break;
     default:

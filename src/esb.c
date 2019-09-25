@@ -29,6 +29,7 @@
 
 #include "esb.h"
 #include "pm.h"
+#include "led.h"
 
 #include <nrf.h>
 
@@ -38,7 +39,7 @@
 #endif
 
 #define RXQ_LEN 16
-#define TXQ_LEN 16
+#define TXQ_LEN 8 // Size will be equally divided between Raw and P2P queues
 
 static bool isInit = true;
 
@@ -54,9 +55,13 @@ static EsbPacket rxPackets[RXQ_LEN];
 static int rxq_head = 0;
 static int rxq_tail = 0;
 
-static EsbPacket txPackets[TXQ_LEN];
-static int txq_head = 0;
-static int txq_tail = 0;
+static EsbPacket txRawPackets[TXQ_LEN];
+static int txrawq_head = 0;
+static int txrawq_tail = 0;
+
+static EsbPacket txP2PPackets[TXQ_LEN];
+static int txp2pq_head = 0;
+static int txp2pq_tail = 0;
 
 // 1bit packet counters
 static int curr_down = 1;
@@ -121,8 +126,8 @@ static void setupTx(bool retry, bool empty)
   } else if (!empty) { // Non-empty retry
     if (lastSentPacket != &ackPacket) {
       //No retry, TX payload has been sent!
-      if (txq_head != txq_tail) {
-        txq_tail = ((txq_tail+1)%TXQ_LEN);
+      if (txrawq_head != txrawq_tail) {
+        txrawq_tail = ((txrawq_tail+1)%TXQ_LEN);
       }
     }
     if (lastSentPacket == &servicePacket) {
@@ -132,13 +137,13 @@ static void setupTx(bool retry, bool empty)
     if (servicePacket.size) {
       NRF_RADIO->PACKETPTR = (uint32_t)&servicePacket;
       lastSentPacket = &servicePacket;
-    } else if (txq_tail != txq_head) {
+    } else if (txrawq_tail != txrawq_head) {
       // Send next TX packet
-      NRF_RADIO->PACKETPTR = (uint32_t)&txPackets[txq_tail];
+      NRF_RADIO->PACKETPTR = (uint32_t)&txRawPackets[txrawq_tail];
       if (has_safelink) {
-        txPackets[txq_tail].data[0] = (txPackets[txq_tail].data[0]&0xf3) | curr_down<<2;
+        txRawPackets[txrawq_tail].data[0] = (txRawPackets[txrawq_tail].data[0]&0xf3) | curr_down<<2;
       }
-      lastSentPacket = &txPackets[txq_tail];
+      lastSentPacket = &txRawPackets[txrawq_tail];
     } else {
       // Send empty ACK
 #ifdef RSSI_ACK_PACKET
@@ -436,25 +441,51 @@ void esbReleaseRxPacket()
   rxq_tail = (rxq_tail+1)%RXQ_LEN;
 }
 
-bool esbCanTxPacket()
+bool esbCanTxRawPacket()
 {
-  return ((txq_head+1)%TXQ_LEN)!=txq_tail;
+  return ((txrawq_head+1)%TXQ_LEN)!=txrawq_tail;
 }
 
-EsbPacket * esbGetTxPacket()
+bool esbCanTxP2PPacket()
+{
+  return ((txp2pq_head+1)%TXQ_LEN)!=txp2pq_tail;
+}
+
+EsbPacket * esbGetTxRawPacket()
 {
   EsbPacket *pk = NULL;
 
-  if (esbCanTxPacket()) {
-    pk = &txPackets[txq_head];
+  if (esbCanTxRawPacket()) {
+    pk = &txRawPackets[txrawq_head];
   }
 
   return pk;
 }
 
-void esbSendTxPacket()
+EsbPacket * esbGetTxP2PPacket()
 {
-  txq_head = (txq_head+1)%TXQ_LEN;
+  EsbPacket *pk = NULL;
+
+  if (esbCanTxP2PPacket()) {
+    pk = &txP2PPackets[txp2pq_head];
+  }
+
+  return pk;
+}
+
+void esbSendTxRawPacket()
+{
+  txrawq_head = (txrawq_head+1)%TXQ_LEN;
+}
+
+void esbSendTxP2PPacket()
+{
+  txp2pq_head = (txp2pq_head+1)%TXQ_LEN;
+
+  if(rs == doRx)
+  {
+    // TODO if in RX mode, cut it and goto TX
+  }
 }
 
 void esbSetDatarate(EsbDatarate dr)
