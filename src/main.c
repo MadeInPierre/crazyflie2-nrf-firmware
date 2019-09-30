@@ -215,15 +215,23 @@ void mainloop()
         } else {
           // The first byte sent is the P2P port
           slTxPacket.data[0] = packet->data[1] & 0x0F;
+
+          // Copy the packet data
           memcpy(&slTxPacket.data[1], &packet->data[2], packet->size-2);
           slTxPacket.length = packet->size-2;
+
+          // Add the RSSI value if there's room for it
+          if(slTxPacket.length < SYSLINK_MTU) {
+            slTxPacket.data[slTxPacket.length] = rssi;
+            slTxPacket.length++;
+          }
+
           if (broadcast) {
             slTxPacket.type = SYSLINK_RADIO_P2P_BROADCAST;
           } else {
             slTxPacket.type = SYSLINK_RADIO_P2P;
           }
         }
-        
 
         syslinkSend(&slTxPacket);
       }
@@ -235,15 +243,15 @@ void mainloop()
       switch (slRxPacket.type)
       {
         case SYSLINK_RADIO_RAW:
-          if (esbCanTxRawPacket() && (slRxPacket.length < SYSLINK_MTU))
+          if (esbCanTxPacket() && (slRxPacket.length < SYSLINK_MTU))
           {
-            EsbPacket* packet = esbGetTxRawPacket();
+            EsbPacket* packet = esbGetTxPacket();
 
             if (packet) {
               memcpy(packet->data, slRxPacket.data, slRxPacket.length);
               packet->size = slRxPacket.length;
 
-              esbSendTxRawPacket(packet);
+              esbSendTxPacket(packet);
             }
             bzero(slRxPacket.data, SYSLINK_MTU);
           }
@@ -258,15 +266,27 @@ void mainloop()
 
           break;
         case SYSLINK_RADIO_P2P:
-          if (esbCanTxP2PPacket() && (slRxPacket.length < SYSLINK_MTU))
+          if ((slRxPacket.length < SYSLINK_MTU))
           {
-            EsbPacket* packet = esbGetTxP2PPacket();
+            EsbPacket* packet = esbGetBroadcastTxPacket();
 
             if (packet) {
-              memcpy(packet->data, slRxPacket.data, slRxPacket.length);
-              packet->size = slRxPacket.length;
+              /* TODO P2P Packet structure :
+                *  - Size of data
+                *  - s1 (ack and pid), auto filled by esb
+                *  - Data (32 bytes):
+                *    - [0] Null packet identifier (0xf3)
+                *    - [1] Header with destination port (0x8X)
+                *    - [2] Destination address (0x00 to 0xFF, will be 0xE7E7E7E7XX)
+                *    - [3] TODO RSSI ?
+                *    - [4...] Data
+              */
+              packet->data[0] = 0xf3;
+              packet->data[1] = 0x80 | (slRxPacket.data[0] & 0x0F);
+              memcpy(&packet->data[2], &slRxPacket.data[1], slRxPacket.length-1);
+              packet->size = 1 + slRxPacket.length; // 0xf3 + 0x8X + (slRxPacket.length-1)
 
-              esbSendTxP2PPacket(packet);
+              esbSendBroadcastTxPacket(packet);
             }
             bzero(slRxPacket.data, SYSLINK_MTU);
           }
@@ -472,10 +492,10 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
 #if BLE
       bleCrazyfliesSendPacket(&txpk);
 #endif
-      if (esbCanTxRawPacket()) {
-        struct esbPacket_s *pk = esbGetTxRawPacket();
+      if (esbCanTxPacket()) {
+        struct esbPacket_s *pk = esbGetTxPacket();
         memcpy(pk, &txpk, sizeof(struct esbPacket_s));
-        esbSendTxRawPacket(pk);
+        esbSendTxPacket(pk);
       }
 
       break;
@@ -506,9 +526,9 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
       pmSetState(pmSysRunning);
       break;
     case BOOTLOADER_CMD_GETVBAT:
-      if (esbCanTxRawPacket()) {
+      if (esbCanTxPacket()) {
         float vbat = pmGetVBAT();
-        struct esbPacket_s *pk = esbGetTxRawPacket();
+        struct esbPacket_s *pk = esbGetTxPacket();
 
         pk->data[0] = 0xff;
         pk->data[1] = 0xfe;
@@ -517,7 +537,7 @@ static void handleBootloaderCmd(struct esbPacket_s *packet)
         memcpy(&(pk->data[3]), &vbat, sizeof(float));
         pk->size = 3 + sizeof(float);
 
-        esbSendTxRawPacket(pk);
+        esbSendTxPacket(pk);
       }
       break;
     default:

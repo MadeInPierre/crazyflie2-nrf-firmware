@@ -39,7 +39,7 @@
 #endif
 
 #define RXQ_LEN 16
-#define TXQ_LEN 8 // Size will be equally divided between Raw and P2P queues
+#define TXQ_LEN 8
 
 static bool isInit = true;
 
@@ -49,19 +49,19 @@ static int txpower = RADIO_TXPOWER_TXPOWER_0dBm;
 static bool contwave = false;
 static uint64_t address = 0xE7E7E7E7E7ULL;
 
-static enum {doTx, doRx} rs;      //Radio state
+static enum {doTx, doRx, doBroadcast} rs;      //Radio state
 
 static EsbPacket rxPackets[RXQ_LEN];
 static int rxq_head = 0;
 static int rxq_tail = 0;
 
-static EsbPacket txRawPackets[TXQ_LEN];
-static int txrawq_head = 0;
-static int txrawq_tail = 0;
+static EsbPacket txPackets[TXQ_LEN];
+static int txq_head = 0;
+static int txq_tail = 0;
 
-static EsbPacket txP2PPackets[TXQ_LEN];
-static int txp2pq_head = 0;
-static int txp2pq_tail = 0;
+static EsbPacket broadcast[TXQ_LEN];
+static int btxq_head = 0;
+static int btxq_tail = 0;
 
 // 1bit packet counters
 static int curr_down = 1;
@@ -126,8 +126,8 @@ static void setupTx(bool retry, bool empty)
   } else if (!empty) { // Non-empty retry
     if (lastSentPacket != &ackPacket) {
       //No retry, TX payload has been sent!
-      if (txrawq_head != txrawq_tail) {
-        txrawq_tail = ((txrawq_tail+1)%TXQ_LEN);
+      if (txq_head != txq_tail) {
+        txq_tail = ((txq_tail+1)%TXQ_LEN);
       }
     }
     if (lastSentPacket == &servicePacket) {
@@ -137,13 +137,13 @@ static void setupTx(bool retry, bool empty)
     if (servicePacket.size) {
       NRF_RADIO->PACKETPTR = (uint32_t)&servicePacket;
       lastSentPacket = &servicePacket;
-    } else if (txrawq_tail != txrawq_head) {
+    } else if (txq_tail != txq_head) {
       // Send next TX packet
-      NRF_RADIO->PACKETPTR = (uint32_t)&txRawPackets[txrawq_tail];
+      NRF_RADIO->PACKETPTR = (uint32_t)&txPackets[txq_tail];
       if (has_safelink) {
-        txRawPackets[txrawq_tail].data[0] = (txRawPackets[txrawq_tail].data[0]&0xf3) | curr_down<<2;
+        txPackets[txq_tail].data[0] = (txPackets[txq_tail].data[0]&0xf3) | curr_down<<2;
       }
-      lastSentPacket = &txRawPackets[txrawq_tail];
+      lastSentPacket = &txPackets[txq_tail];
     } else {
       // Send empty ACK
 #ifdef RSSI_ACK_PACKET
@@ -184,8 +184,46 @@ static void setupRx()
 
   NRF_RADIO->SHORTS &= ~RADIO_SHORTS_DISABLED_TXEN_Msk;
   NRF_RADIO->SHORTS |= RADIO_SHORTS_DISABLED_RXEN_Msk;
+  NRF_RADIO->TXADDRESS = 0x00UL;
   rs = doRx;
   NRF_RADIO->TASKS_DISABLE = 1UL;
+
+  LED_OFF();
+}
+//send broadcast
+static void setupBroadcast(bool frommain)
+{
+  //broadcast address
+  if (btxq_tail != btxq_head)
+  {
+    if(rs==doRx ||(!frommain && rs==doRx)) //other events get interrupted
+    {
+      NRF_RADIO->TXADDRESS = 0x01UL;
+      NRF_RADIO->PACKETPTR = (uint32_t)&broadcast[btxq_tail];
+      btxq_tail = ((btxq_tail+1)%TXQ_LEN);
+      if(rs==doRx)
+      {
+        NRF_RADIO->SHORTS &= ~RADIO_SHORTS_DISABLED_RXEN_Msk;
+        NRF_RADIO->SHORTS |= RADIO_SHORTS_DISABLED_TXEN_Msk;
+        rs = doBroadcast;
+        NRF_RADIO->TASKS_DISABLE = 1UL;
+      }
+      else 
+      {
+        //doTx so already in tx mode
+        rs = doBroadcast;
+        NRF_RADIO->TASKS_START = 1UL;
+      }
+    }
+    else if(!frommain)//if salready in the mode it should be triggered by the interrupt handler.
+    {
+      // Send next TX packet
+      NRF_RADIO->PACKETPTR = (uint32_t)&broadcast[btxq_tail];
+      btxq_tail = ((btxq_tail+1)%TXQ_LEN);
+      NRF_RADIO->TASKS_START = 1UL;
+    }
+    LED_ON(); // Debug
+  } 
 }
 
 void RADIO_IRQHandler()
@@ -204,7 +242,14 @@ void esbInterruptHandler()
     case doRx:
       //Wrong CRC packet are dropped
       if (!NRF_RADIO->CRCSTATUS) {
-        NRF_RADIO->TASKS_START = 1UL;
+    	  if(btxq_tail != btxq_head)
+        {
+          setupBroadcast(false);
+        }
+        else
+        {
+			    NRF_RADIO->TASKS_START = 1UL;
+		    }
         return;
       }
 
@@ -215,7 +260,14 @@ void esbInterruptHandler()
 
       // If no more space available on RX queue, drop packet!
       if (((rxq_head+1)%RXQ_LEN) == rxq_tail) {
-        NRF_RADIO->TASKS_START = 1UL;
+    	  if(btxq_tail != btxq_head)
+        {
+          setupBroadcast(false);
+        }
+        else
+        {
+          NRF_RADIO->TASKS_START = 1UL;
+        }
         return;
       }
 
@@ -280,15 +332,31 @@ void esbInterruptHandler()
         // Push the queue head to push this packet and prepare the next
         rxq_head = ((rxq_head+1)%RXQ_LEN);
         // broadcast => no ack
-        NRF_RADIO->PACKETPTR = (uint32_t)&rxPackets[rxq_head];
-        NRF_RADIO->TASKS_START = 1UL;
+
+        if(btxq_tail != btxq_head)
+        {
+          setupBroadcast(false);
+        }
+        else
+        {
+          NRF_RADIO->PACKETPTR = (uint32_t)&rxPackets[rxq_head];
+          NRF_RADIO->TASKS_START = 1UL;
+        }
       }
-
-
       break;
+
     case doTx:
-      //Setup RX for next packet
-      setupRx();
+    	if(btxq_tail != btxq_head)
+    		setupBroadcast(false);
+    	else
+    		setupRx(); //Setup RX for next packet
+      break;
+
+    case doBroadcast:
+    	if(btxq_tail != btxq_head)
+    		setupBroadcast(false);
+    	else
+    		setupRx(); //Setup RX for next packet
       break;
     }
   }
@@ -441,51 +509,43 @@ void esbReleaseRxPacket()
   rxq_tail = (rxq_tail+1)%RXQ_LEN;
 }
 
-bool esbCanTxRawPacket()
+bool esbCanTxPacket()
 {
-  return ((txrawq_head+1)%TXQ_LEN)!=txrawq_tail;
+  return ((txq_head+1)%TXQ_LEN)!=txq_tail;
 }
 
-bool esbCanTxP2PPacket()
-{
-  return ((txp2pq_head+1)%TXQ_LEN)!=txp2pq_tail;
-}
-
-EsbPacket * esbGetTxRawPacket()
+EsbPacket * esbGetTxPacket()
 {
   EsbPacket *pk = NULL;
 
-  if (esbCanTxRawPacket()) {
-    pk = &txRawPackets[txrawq_head];
+  if (esbCanTxPacket()) {
+    pk = &txPackets[txq_head];
   }
 
   return pk;
 }
 
-EsbPacket * esbGetTxP2PPacket()
+EsbPacket * esbGetBroadcastTxPacket()
 {
   EsbPacket *pk = NULL;
-
-  if (esbCanTxP2PPacket()) {
-    pk = &txP2PPackets[txp2pq_head];
-  }
-
-  return pk;
-}
-
-void esbSendTxRawPacket()
-{
-  txrawq_head = (txrawq_head+1)%TXQ_LEN;
-}
-
-void esbSendTxP2PPacket()
-{
-  txp2pq_head = (txp2pq_head+1)%TXQ_LEN;
-
-  if(rs == doRx)
+  if(((btxq_head+1)%TXQ_LEN)!=btxq_tail)
   {
-    // TODO if in RX mode, cut it and goto TX
+	  pk = &broadcast[btxq_head];
   }
+
+  return pk;
+}
+
+void esbSendBroadcastTxPacket()
+{
+  btxq_head = (btxq_head+1)%TXQ_LEN;
+  if(rs == doRx) //in broadcast state it will send the net by itself and in doTx too
+	  setupBroadcast(true);
+}
+
+void esbSendTxPacket()
+{
+  txq_head = (txq_head+1)%TXQ_LEN;
 }
 
 void esbSetDatarate(EsbDatarate dr)

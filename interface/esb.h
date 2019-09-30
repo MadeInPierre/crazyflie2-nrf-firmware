@@ -81,16 +81,16 @@ EsbPacket * esbGetRxPacket();
 void esbReleaseRxPacket();
 
 /* Return true if a packet can be pushed in the TX queue */
-bool esbCanTxRawPacket();
-bool esbCanTxP2PPacket();
+bool esbCanTxPacket();
+bool esbCanTxBroadcastPacket();
 
 /* Return the address of the next TX packet in the TX queue */
-EsbPacket * esbGetTxRawPacket();
-EsbPacket * esbGetTxP2PPacket();
+EsbPacket * esbGetTxPacket();
+EsbPacket * esbGetBroadcastTxPacket();
 
 /* Release and set for sending the buffer returned by getTxPacket */
-void esbSendTxRawPacket();
-void esbSendTxP2PPacket();
+void esbSendTxPacket();
+void esbSendBroadcastTxPacket();
 
 /* Set datarate */
 void esbSetDatarate(EsbDatarate datarate);
