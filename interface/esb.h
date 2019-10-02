@@ -92,6 +92,9 @@ EsbPacket * esbGetBroadcastTxPacket();
 void esbSendTxPacket();
 void esbSendBroadcastTxPacket();
 
+/* Get the drone address' last 4 bits */
+uint8_t esbGetId();
+
 /* Set datarate */
 void esbSetDatarate(EsbDatarate datarate);
 

@@ -188,8 +188,9 @@ static void setupRx()
   rs = doRx;
   NRF_RADIO->TASKS_DISABLE = 1UL;
 
-  LED_OFF();
+  LED_OFF(); // Debug
 }
+
 //send broadcast
 static void setupBroadcast(bool frommain)
 {
@@ -602,6 +603,12 @@ void esbSetTxPowerDbm(int8_t powerDbm)
   else if (powerDbm >=  4)  { txpower = RADIO_TXPOWER_TXPOWER_Pos4dBm; }
 
   esbReset();
+}
+
+// Returns the drone's last 4 address bits
+uint8_t esbGetId()
+{
+  return (uint8_t)address & 0x0F; 
 }
 
 void esbSetAddress(uint64_t addr)

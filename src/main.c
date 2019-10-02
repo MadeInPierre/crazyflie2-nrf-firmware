@@ -119,7 +119,7 @@ int main()
 		  pmSetState(pmSysRunning);
   }
 
-  LED_ON();
+  LED_OFF();
 
 
   NRF_GPIO->PIN_CNF[RADIO_PAEN_PIN] |= GPIO_PIN_CNF_DIR_Output | (GPIO_PIN_CNF_DRIVE_S0H1<<GPIO_PIN_CNF_DRIVE_Pos);
@@ -177,6 +177,7 @@ void mainloop()
       rssi = packet->rssi;
       // The received packet was a broadcast, if received on local address 1
       broadcast = packet->match == ESB_MULTICAST_ADDRESS_MATCH;
+
       // If the packet is a null packet with data[1] == 0x8*, it is a P2P packet
       if (packet->size >= 2 && (packet->data[0] & 0xf3) == 0xf3 && (packet->data[1] & 0xF0) == 0x80) {
         p2p = true;
@@ -214,17 +215,17 @@ void mainloop()
           }
         } else {
           // The first byte sent is the P2P port
-          slTxPacket.data[0] = packet->data[1] & 0x0F;
+          slTxPacket.data[0] = 0x80 | (packet->data[1] & 0x0F);
+          
+          // Then the peers involved in this message
+          slTxPacket.data[1] = packet->data[2];
+
+          // Add the RSSI reception value
+          slTxPacket.data[2] = rssi;
 
           // Copy the packet data
-          memcpy(&slTxPacket.data[1], &packet->data[2], packet->size-2);
-          slTxPacket.length = packet->size-2;
-
-          // Add the RSSI value if there's room for it
-          if(slTxPacket.length < SYSLINK_MTU) {
-            slTxPacket.data[slTxPacket.length] = rssi;
-            slTxPacket.length++;
-          }
+          memcpy(&slTxPacket.data[3], &packet->data[3], packet->size);
+          slTxPacket.length = packet->size;
 
           if (broadcast) {
             slTxPacket.type = SYSLINK_RADIO_P2P_BROADCAST;
@@ -271,20 +272,14 @@ void mainloop()
             EsbPacket* packet = esbGetBroadcastTxPacket();
 
             if (packet) {
-              /* TODO P2P Packet structure :
-                *  - Size of data
-                *  - s1 (ack and pid), auto filled by esb
-                *  - Data (32 bytes):
-                *    - [0] Null packet identifier (0xf3)
-                *    - [1] Header with destination port (0x8X)
-                *    - [2] Destination address (0x00 to 0xFF, will be 0xE7E7E7E7XX)
-                *    - [3] TODO RSSI ?
-                *    - [4...] Data
-              */
+              // Set null identifier, destination port and peers ids
               packet->data[0] = 0xf3;
               packet->data[1] = 0x80 | (slRxPacket.data[0] & 0x0F);
-              memcpy(&packet->data[2], &slRxPacket.data[1], slRxPacket.length-1);
-              packet->size = 1 + slRxPacket.length; // 0xf3 + 0x8X + (slRxPacket.length-1)
+              packet->data[2] = ((esbGetId() << 4) & 0xF0) | ((slRxPacket.data[0] >> 4) & 0x0F);
+
+              // Copy packet data
+              memcpy(&packet->data[3], &slRxPacket.data[1], slRxPacket.length-1);
+              packet->size = 2 + slRxPacket.length; // 0xf3 + 0x8X + peers + (slRxPacket.length-1)
 
               esbSendBroadcastTxPacket(packet);
             }
