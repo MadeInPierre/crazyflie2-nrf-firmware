@@ -119,7 +119,7 @@ int main()
 		  pmSetState(pmSysRunning);
   }
 
-  LED_OFF();
+  LED_ON();
 
 
   NRF_GPIO->PIN_CNF[RADIO_PAEN_PIN] |= GPIO_PIN_CNF_DIR_Output | (GPIO_PIN_CNF_DRIVE_S0H1<<GPIO_PIN_CNF_DRIVE_Pos);
