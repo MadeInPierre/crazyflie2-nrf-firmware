@@ -29,7 +29,6 @@
 
 #include "esb.h"
 #include "pm.h"
-#include "led.h"
 
 #include <nrf.h>
 
@@ -187,8 +186,6 @@ static void setupRx()
   NRF_RADIO->TXADDRESS = 0x00UL;
   rs = doRx;
   NRF_RADIO->TASKS_DISABLE = 1UL;
-
-  LED_OFF(); // Debug
 }
 
 //send broadcast
@@ -223,7 +220,6 @@ static void setupBroadcast(bool frommain)
       btxq_tail = ((btxq_tail+1)%TXQ_LEN);
       NRF_RADIO->TASKS_START = 1UL;
     }
-    LED_ON(); // Debug
   } 
 }
 

@@ -173,8 +173,6 @@ void mainloop()
     if ((esbReceived == false) && esbIsRxPacket())
     {
       EsbPacket* packet = esbGetRxPacket();
-      //Store RSSI here so that we can send it to STM later
-      rssi = packet->rssi;
       // The received packet was a broadcast, if received on local address 1
       broadcast = packet->match == ESB_MULTICAST_ADDRESS_MATCH;
 
@@ -183,6 +181,9 @@ void mainloop()
         p2p = true;
       } else {
         p2p = false;
+
+        //Store the CRTP RSSI here so that we can send it to STM later
+        rssi = packet->rssi;
       }
       memcpy(esbRxPacket.data, packet->data, packet->size);
       esbRxPacket.size = packet->size;
@@ -221,7 +222,7 @@ void mainloop()
           slTxPacket.data[1] = packet->data[2];
 
           // Add the RSSI reception value
-          slTxPacket.data[2] = rssi;
+          slTxPacket.data[2] = packet->rssi;
 
           // Copy the packet data
           memcpy(&slTxPacket.data[3], &packet->data[3], packet->size);
